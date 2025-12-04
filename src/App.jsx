@@ -1,7 +1,13 @@
+import ImageCropper from "./ImageCropper";
+
 function App() {
   return (
     <>
-      <h1 className="text-2xl text-red-800">hello</h1>
+      {" "}
+      <div className="min-h-screen p-8">
+        <h1 className="text-2xl font-bold mb-6 text-center">Image Resize</h1>
+        <ImageCropper />
+      </div>
     </>
   );
 }
