@@ -1,32 +1,50 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Upload, Crop, Maximize2, Download, RotateCw } from "lucide-react";
+import { Upload, Crop, Download, RotateCw, Image } from "lucide-react";
 
-export default function ImageCropperResizer() {
+export default function AdvancedImageEditor() {
   const [image, setImage] = useState(null);
   const [crop, setCrop] = useState({ x: 0, y: 0, width: 200, height: 200 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragType, setDragType] = useState(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  const [maintainAspect, setMaintainAspect] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState("free");
+  const [outputFormat, setOutputFormat] = useState("png");
+  const [quality, setQuality] = useState(0.92);
+  const [targetFileSize, setTargetFileSize] = useState(500);
+  const [multipleOutputs, setMultipleOutputs] = useState([
+    { width: 1920, height: 1080, enabled: false },
+    { width: 1280, height: 720, enabled: false },
+    { width: 640, height: 480, enabled: false },
+  ]);
+  const [processedImages, setProcessedImages] = useState([]);
+
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
-  const containerRef = useRef(null);
+
+  const aspectRatios = {
+    free: { label: "Free", ratio: null },
+    "1:1": { label: "1:1 Square", ratio: 1 },
+    "4:3": { label: "4:3 Standard", ratio: 4 / 3 },
+    "16:9": { label: "16:9 Widescreen", ratio: 16 / 9 },
+    "21:9": { label: "21:9 Ultrawide", ratio: 21 / 9 },
+    "9:16": { label: "9:16 Portrait", ratio: 9 / 16 },
+    "3:4": { label: "3:4 Portrait", ratio: 3 / 4 },
+  };
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
-        const img = new Image();
+        const img = new window.Image();
         img.onload = () => {
           setImage(event.target.result);
-          setDimensions({ width: img.width, height: img.height });
+          const size = Math.min(img.width, img.height, 300);
           setCrop({
-            x: 0,
-            y: 0,
-            width: Math.min(200, img.width),
-            height: Math.min(200, img.height),
+            x: (img.width - size) / 2,
+            y: (img.height - size) / 2,
+            width: size,
+            height: size,
           });
         };
         img.src = event.target.result;
@@ -68,20 +86,37 @@ export default function ImageCropperResizer() {
         ),
       }));
     } else if (dragType === "resize") {
-      setCrop((prev) => ({
-        ...prev,
-        width: Math.max(
+      const ratio = aspectRatios[aspectRatio].ratio;
+
+      if (ratio) {
+        const newWidth = Math.max(
           50,
-          Math.min(prev.width + deltaX, imageRef.current.naturalWidth - prev.x)
-        ),
-        height: Math.max(
-          50,
-          Math.min(
-            prev.height + deltaY,
-            imageRef.current.naturalHeight - prev.y
-          )
-        ),
-      }));
+          Math.min(crop.width + deltaX, imageRef.current.naturalWidth - crop.x)
+        );
+        const newHeight = newWidth / ratio;
+
+        if (crop.y + newHeight <= imageRef.current.naturalHeight) {
+          setCrop((prev) => ({ ...prev, width: newWidth, height: newHeight }));
+        }
+      } else {
+        setCrop((prev) => ({
+          ...prev,
+          width: Math.max(
+            50,
+            Math.min(
+              prev.width + deltaX,
+              imageRef.current.naturalWidth - prev.x
+            )
+          ),
+          height: Math.max(
+            50,
+            Math.min(
+              prev.height + deltaY,
+              imageRef.current.naturalHeight - prev.y
+            )
+          ),
+        }));
+      }
     }
 
     setDragStart({ x: e.clientX, y: e.clientY });
@@ -103,7 +138,50 @@ export default function ImageCropperResizer() {
     }
   }, [isDragging, dragStart]);
 
-  const applyCrop = () => {
+  useEffect(() => {
+    const ratio = aspectRatios[aspectRatio].ratio;
+    if (ratio && imageRef.current) {
+      setCrop((prev) => ({
+        ...prev,
+        height: prev.width / ratio,
+      }));
+    }
+  }, [aspectRatio]);
+
+  const getCropStyle = () => {
+    if (!imageRef.current) return {};
+    const rect = imageRef.current.getBoundingClientRect();
+    const scaleX = rect.width / imageRef.current.naturalWidth;
+    const scaleY = rect.height / imageRef.current.naturalHeight;
+
+    return {
+      left: `${crop.x * scaleX}px`,
+      top: `${crop.y * scaleY}px`,
+      width: `${crop.width * scaleX}px`,
+      height: `${crop.height * scaleY}px`,
+    };
+  };
+
+  const compressToTargetSize = async (canvas, format, targetKB) => {
+    let currentQuality = 0.92;
+    let blob;
+
+    for (let i = 0; i < 10; i++) {
+      blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, `image/${format}`, currentQuality)
+      );
+
+      const sizeKB = blob.size / 1024;
+
+      if (sizeKB <= targetKB || currentQuality <= 0.1) break;
+
+      currentQuality -= 0.1;
+    }
+
+    return blob;
+  };
+
+  const processImage = async () => {
     if (!imageRef.current) return;
 
     const canvas = canvasRef.current;
@@ -124,67 +202,100 @@ export default function ImageCropperResizer() {
       crop.height
     );
 
-    const croppedImage = canvas.toDataURL("image/png");
-    setImage(croppedImage);
+    const results = [];
 
-    const img = new Image();
-    img.onload = () => {
-      setDimensions({ width: img.width, height: img.height });
-      setCrop({ x: 0, y: 0, width: img.width, height: img.height });
-    };
-    img.src = croppedImage;
+    // Main cropped image
+    let mainBlob;
+    if (targetFileSize > 0) {
+      mainBlob = await compressToTargetSize(
+        canvas,
+        outputFormat,
+        targetFileSize
+      );
+    } else {
+      mainBlob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, `image/${outputFormat}`, quality)
+      );
+    }
+
+    const mainUrl = URL.createObjectURL(mainBlob);
+    results.push({
+      name: `cropped.${outputFormat}`,
+      url: mainUrl,
+      size: (mainBlob.size / 1024).toFixed(2),
+      dimensions: `${crop.width}x${crop.height}`,
+    });
+
+    // Multiple sized outputs
+    for (const output of multipleOutputs) {
+      if (output.enabled) {
+        const resizeCanvas = document.createElement("canvas");
+        const resizeCtx = resizeCanvas.getContext("2d");
+
+        resizeCanvas.width = output.width;
+        resizeCanvas.height = output.height;
+
+        resizeCtx.drawImage(canvas, 0, 0, output.width, output.height);
+
+        let resizeBlob;
+        if (targetFileSize > 0) {
+          resizeBlob = await compressToTargetSize(
+            resizeCanvas,
+            outputFormat,
+            targetFileSize
+          );
+        } else {
+          resizeBlob = await new Promise((resolve) =>
+            resizeCanvas.toBlob(resolve, `image/${outputFormat}`, quality)
+          );
+        }
+
+        const resizeUrl = URL.createObjectURL(resizeBlob);
+        results.push({
+          name: `${output.width}x${output.height}.${outputFormat}`,
+          url: resizeUrl,
+          size: (resizeBlob.size / 1024).toFixed(2),
+          dimensions: `${output.width}x${output.height}`,
+        });
+      }
+    }
+
+    setProcessedImages(results);
   };
 
-  const applyResize = () => {
-    if (!imageRef.current) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-
-    canvas.width = dimensions.width;
-    canvas.height = dimensions.height;
-
-    ctx.drawImage(imageRef.current, 0, 0, dimensions.width, dimensions.height);
-
-    const resizedImage = canvas.toDataURL("image/png");
-    setImage(resizedImage);
-    setCrop({ x: 0, y: 0, width: dimensions.width, height: dimensions.height });
-  };
-
-  const downloadImage = () => {
-    if (!image) return;
+  const downloadImage = (url, name) => {
     const link = document.createElement("a");
-    link.download = "edited-image.png";
-    link.href = image;
+    link.download = name;
+    link.href = url;
     link.click();
   };
 
-  const getCropStyle = () => {
-    if (!imageRef.current) return {};
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = rect.width / imageRef.current.naturalWidth;
-    const scaleY = rect.height / imageRef.current.naturalHeight;
+  const downloadAll = () => {
+    processedImages.forEach((img, i) => {
+      setTimeout(() => downloadImage(img.url, img.name), i * 200);
+    });
+  };
 
-    return {
-      left: `${crop.x * scaleX}px`,
-      top: `${crop.y * scaleY}px`,
-      width: `${crop.width * scaleX}px`,
-      height: `${crop.height * scaleY}px`,
-    };
+  const updateMultipleOutput = (index, field, value) => {
+    setMultipleOutputs((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-gradient-br from-purple-50 to-blue-100 p-8">
+      <div className="max-w-7xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-6 flex items-center gap-3">
-            <Crop className="text-indigo-600" size={32} />
-            Image Cropper & Resizer
+            <Image className="text-purple-600" size={32} />
+            Advanced Image Cropper & Compressor
           </h1>
 
           {!image ? (
-            <div className="border-4 border-dashed border-indigo-300 rounded-xl p-12 text-center hover:border-indigo-500 transition-colors">
-              <Upload className="mx-auto text-indigo-400 mb-4" size={64} />
+            <div className="border-4 border-dashed border-purple-300 rounded-xl p-12 text-center hover:border-purple-500 transition-colors">
+              <Upload className="mx-auto text-purple-400 mb-4" size={64} />
               <label className="cursor-pointer">
                 <span className="text-lg text-gray-700 font-medium">
                   Click to upload an image
@@ -198,32 +309,37 @@ export default function ImageCropperResizer() {
               </label>
             </div>
           ) : (
-            <div className="space-y-6">
-              <div className="grid md:grid-cols-2 gap-6">
-                {/* Crop Section */}
+            <div className="grid lg:grid-cols-3 gap-6">
+              {/* Left: Preview & Crop */}
+              <div className="lg:col-span-2 space-y-4">
                 <div className="bg-gray-50 rounded-xl p-6">
                   <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <Crop size={20} className="text-indigo-600" />
-                    Crop Image
+                    <Crop size={20} className="text-purple-600" />
+                    Crop Area
                   </h2>
-                  <div
-                    ref={containerRef}
-                    className="relative inline-block mb-4"
-                  >
+                  <div className="relative inline-block mb-4">
                     <img
                       ref={imageRef}
                       src={image}
                       alt="Preview"
                       className="max-w-full h-auto rounded-lg"
-                      style={{ maxHeight: "400px" }}
+                      style={{ maxHeight: "500px" }}
                     />
                     <div
-                      className="absolute border-2 border-indigo-500 bg-indigo-500 bg-opacity-20 cursor-move"
+                      className="absolute border-2 border-purple-500  bg-opacity-20 cursor-move"
                       style={getCropStyle()}
                       onMouseDown={(e) => handleMouseDown(e, "move")}
                     >
+                      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3">
+                        {[...Array(9)].map((_, i) => (
+                          <div
+                            key={i}
+                            className="border border-purple-300 border-opacity-50"
+                          ></div>
+                        ))}
+                      </div>
                       <div
-                        className="absolute bottom-0 right-0 w-4 h-4 bg-indigo-600 cursor-nwse-resize"
+                        className="absolute bottom-0 right-0 w-5 h-5 bg-purple-600 cursor-nwse-resize rounded-tl"
                         onMouseDown={(e) => {
                           e.stopPropagation();
                           handleMouseDown(e, "resize");
@@ -231,102 +347,202 @@ export default function ImageCropperResizer() {
                       />
                     </div>
                   </div>
-                  <button
-                    onClick={applyCrop}
-                    className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition-colors font-medium"
-                  >
-                    Apply Crop
-                  </button>
+
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Aspect Ratio
+                    </label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {Object.entries(aspectRatios).map(([key, val]) => (
+                        <button
+                          key={key}
+                          onClick={() => setAspectRatio(key)}
+                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            aspectRatio === key
+                              ? "bg-purple-600 text-white"
+                              : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                          }`}
+                        >
+                          {val.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
-                {/* Resize Section */}
+                {/* Processed Images */}
+                {processedImages.length > 0 && (
+                  <div className="bg-gray-50 rounded-xl p-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-xl font-semibold text-gray-800">
+                        Processed Images
+                      </h2>
+                      <button
+                        onClick={downloadAll}
+                        className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+                      >
+                        <Download size={16} />
+                        Download All
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {processedImages.map((img, i) => (
+                        <div key={i} className="bg-white rounded-lg p-3 shadow">
+                          <img
+                            src={img.url}
+                            alt={img.name}
+                            className="w-full h-32 object-cover rounded mb-2"
+                          />
+                          <p className="text-xs font-medium text-gray-800 truncate">
+                            {img.name}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {img.dimensions}
+                          </p>
+                          <p className="text-xs text-gray-500 mb-2">
+                            {img.size} KB
+                          </p>
+                          <button
+                            onClick={() => downloadImage(img.url, img.name)}
+                            className="w-full bg-purple-600 text-white px-2 py-1 rounded text-xs hover:bg-purple-700"
+                          >
+                            Download
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right: Settings */}
+              <div className="space-y-4">
                 <div className="bg-gray-50 rounded-xl p-6">
-                  <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <Maximize2 size={20} className="text-indigo-600" />
-                    Resize Image
+                  <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                    Export Settings
                   </h2>
+
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Width (px)
+                        Output Format
                       </label>
-                      <input
-                        type="number"
-                        value={dimensions.width}
-                        onChange={(e) =>
-                          setDimensions((prev) => ({
-                            width: parseInt(e.target.value) || 0,
-                            height: maintainAspect
-                              ? Math.round(
-                                  (parseInt(e.target.value) || 0) *
-                                    (imageRef.current.naturalHeight /
-                                      imageRef.current.naturalWidth)
-                                )
-                              : prev.height,
-                          }))
-                        }
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      />
+                      <select
+                        value={outputFormat}
+                        onChange={(e) => setOutputFormat(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-neutral-950"
+                      >
+                        <option value="png">PNG</option>
+                        <option value="jpeg">JPEG</option>
+                        <option value="webp">WebP</option>
+                      </select>
                     </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Height (px)
+                        Quality: {Math.round(quality * 100)}%
+                      </label>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="1"
+                        step="0.01"
+                        value={quality}
+                        onChange={(e) => setQuality(parseFloat(e.target.value))}
+                        className="w-full text-neutral-950"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Target File Size (KB) - 0 to disable
                       </label>
                       <input
                         type="number"
-                        value={dimensions.height}
+                        value={targetFileSize}
                         onChange={(e) =>
-                          setDimensions((prev) => ({
-                            height: parseInt(e.target.value) || 0,
-                            width: maintainAspect
-                              ? Math.round(
-                                  (parseInt(e.target.value) || 0) *
-                                    (imageRef.current.naturalWidth /
-                                      imageRef.current.naturalHeight)
-                                )
-                              : prev.width,
-                          }))
+                          setTargetFileSize(parseInt(e.target.value) || 0)
                         }
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-neutral-950"
                       />
                     </div>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={maintainAspect}
-                        onChange={(e) => setMaintainAspect(e.target.checked)}
-                        className="w-4 h-4 text-indigo-600"
-                      />
-                      <span className="text-sm text-gray-700">
-                        Maintain aspect ratio
-                      </span>
-                    </label>
-                    <button
-                      onClick={applyResize}
-                      className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition-colors font-medium"
-                    >
-                      Apply Resize
-                    </button>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex gap-4">
+                <div className="bg-gray-50 rounded-xl p-6">
+                  <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                    Multiple Sizes
+                  </h2>
+                  <div className="space-y-3">
+                    {multipleOutputs.map((output, i) => (
+                      <div key={i} className="bg-white rounded-lg p-3">
+                        <label className="flex items-center gap-2 mb-2">
+                          <input
+                            type="checkbox"
+                            checked={output.enabled}
+                            onChange={(e) =>
+                              updateMultipleOutput(
+                                i,
+                                "enabled",
+                                e.target.checked
+                              )
+                            }
+                            className="w-4 h-4 text-purple-600"
+                          />
+                          <span className="text-sm font-medium text-gray-700">
+                            {output.width}x{output.height}
+                          </span>
+                        </label>
+                        {output.enabled && (
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="number"
+                              value={output.width}
+                              onChange={(e) =>
+                                updateMultipleOutput(
+                                  i,
+                                  "width",
+                                  parseInt(e.target.value) || 0
+                                )
+                              }
+                              placeholder="Width"
+                              className="px-2 py-1 border border-gray-300 rounded text-neutral-950 text-sm"
+                            />
+                            <input
+                              type="number"
+                              value={output.height}
+                              onChange={(e) =>
+                                updateMultipleOutput(
+                                  i,
+                                  "height",
+                                  parseInt(e.target.value) || 0
+                                )
+                              }
+                              placeholder="Height"
+                              className="px-2 py-1 border border-gray-300 text-neutral-950 rounded text-sm"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <button
-                  onClick={downloadImage}
-                  className="flex-1 bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2"
+                  onClick={processImage}
+                  className="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 transition-colors font-medium text-lg"
                 >
-                  <Download size={20} />
-                  Download Image
+                  Process Image
                 </button>
-                <label className="flex-1 bg-gray-600 text-white py-3 rounded-lg hover:bg-gray-700 transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer">
+
+                <label className="w-full bg-gray-600 text-white py-3 rounded-lg hover:bg-gray-700 transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer">
                   <RotateCw size={20} />
                   Upload New Image
                   <input
                     type="file"
                     accept="image/*"
                     onChange={handleImageUpload}
-                    className="hidden"
+                    className="hidden "
                   />
                 </label>
               </div>
