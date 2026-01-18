@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Upload, Crop, Download, RotateCw, Image } from "lucide-react";
+import { Upload, Crop, Download, RotateCw, Image, Trash2 } from "lucide-react";
 
-export default function AdvancedImageEditor() {
+export default function AdvancedImageCropper() {
   const [image, setImage] = useState(null);
-  const [crop, setCrop] = useState({ x: 0, y: 0, width: 200, height: 200 });
+  const [crop, setCrop] = useState({ x: 50, y: 50, width: 300, height: 300 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragType, setDragType] = useState(null);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0, cropStart: {} });
   const [aspectRatio, setAspectRatio] = useState("free");
-  const [outputFormat, setOutputFormat] = useState("png");
+  const [outputFormat, setOutputFormat] = useState("jpeg");
   const [quality, setQuality] = useState(0.92);
   const [targetFileSize, setTargetFileSize] = useState(500);
   const [multipleOutputs, setMultipleOutputs] = useState([
@@ -20,15 +20,16 @@ export default function AdvancedImageEditor() {
 
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
+  const containerRef = useRef(null);
 
   const aspectRatios = {
     free: { label: "Free", ratio: null },
-    "1:1": { label: "1:1 Square", ratio: 1 },
-    "4:3": { label: "4:3 Standard", ratio: 4 / 3 },
-    "16:9": { label: "16:9 Widescreen", ratio: 16 / 9 },
-    "21:9": { label: "21:9 Ultrawide", ratio: 21 / 9 },
-    "9:16": { label: "9:16 Portrait", ratio: 9 / 16 },
-    "3:4": { label: "3:4 Portrait", ratio: 3 / 4 },
+    "1:1": { label: "1:1", ratio: 1 },
+    "4:3": { label: "4:3", ratio: 4 / 3 },
+    "16:9": { label: "16:9", ratio: 16 / 9 },
+    "21:9": { label: "21:9", ratio: 21 / 9 },
+    "9:16": { label: "9:16", ratio: 9 / 16 },
+    "4:5": { label: "4:5", ratio: 4 / 5 },
   };
 
   const handleImageUpload = (e) => {
@@ -39,13 +40,14 @@ export default function AdvancedImageEditor() {
         const img = new window.Image();
         img.onload = () => {
           setImage(event.target.result);
-          const size = Math.min(img.width, img.height, 300);
+          const size = Math.min(img.width, img.height, 400);
           setCrop({
             x: (img.width - size) / 2,
             y: (img.height - size) / 2,
             width: size,
             height: size,
           });
+          setProcessedImages([]);
         };
         img.src = event.target.result;
       };
@@ -53,73 +55,150 @@ export default function AdvancedImageEditor() {
     }
   };
 
+  const getMousePosition = (e) => {
+    if (!imageRef.current) return { x: 0, y: 0 };
+    const rect = imageRef.current.getBoundingClientRect();
+    const scaleX = imageRef.current.naturalWidth / rect.width;
+    const scaleY = imageRef.current.naturalHeight / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  };
+
   const handleMouseDown = (e, type) => {
     e.preventDefault();
+    e.stopPropagation();
+    const pos = getMousePosition(e);
     setIsDragging(true);
     setDragType(type);
-    setDragStart({ x: e.clientX, y: e.clientY });
+    setDragStart({
+      x: pos.x,
+      y: pos.y,
+      cropStart: { ...crop },
+    });
+  };
+
+  const constrainCrop = (newCrop) => {
+    if (!imageRef.current) return newCrop;
+    const maxWidth = imageRef.current.naturalWidth;
+    const maxHeight = imageRef.current.naturalHeight;
+
+    return {
+      x: Math.max(0, Math.min(newCrop.x, maxWidth - newCrop.width)),
+      y: Math.max(0, Math.min(newCrop.y, maxHeight - newCrop.height)),
+      width: Math.max(50, Math.min(newCrop.width, maxWidth - newCrop.x)),
+      height: Math.max(50, Math.min(newCrop.height, maxHeight - newCrop.y)),
+    };
   };
 
   const handleMouseMove = (e) => {
     if (!isDragging || !imageRef.current) return;
 
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = imageRef.current.naturalWidth / rect.width;
-    const scaleY = imageRef.current.naturalHeight / rect.height;
+    const pos = getMousePosition(e);
+    const deltaX = pos.x - dragStart.x;
+    const deltaY = pos.y - dragStart.y;
+    const ratio = aspectRatios[aspectRatio].ratio;
 
-    const deltaX = (e.clientX - dragStart.x) * scaleX;
-    const deltaY = (e.clientY - dragStart.y) * scaleY;
+    let newCrop = { ...crop };
 
     if (dragType === "move") {
-      setCrop((prev) => ({
-        ...prev,
-        x: Math.max(
-          0,
-          Math.min(prev.x + deltaX, imageRef.current.naturalWidth - prev.width)
-        ),
-        y: Math.max(
-          0,
-          Math.min(
-            prev.y + deltaY,
-            imageRef.current.naturalHeight - prev.height
-          )
-        ),
-      }));
-    } else if (dragType === "resize") {
-      const ratio = aspectRatios[aspectRatio].ratio;
-
-      if (ratio) {
-        const newWidth = Math.max(
-          50,
-          Math.min(crop.width + deltaX, imageRef.current.naturalWidth - crop.x)
-        );
-        const newHeight = newWidth / ratio;
-
-        if (crop.y + newHeight <= imageRef.current.naturalHeight) {
-          setCrop((prev) => ({ ...prev, width: newWidth, height: newHeight }));
-        }
-      } else {
-        setCrop((prev) => ({
-          ...prev,
-          width: Math.max(
-            50,
-            Math.min(
-              prev.width + deltaX,
-              imageRef.current.naturalWidth - prev.x
-            )
-          ),
-          height: Math.max(
-            50,
-            Math.min(
-              prev.height + deltaY,
-              imageRef.current.naturalHeight - prev.y
-            )
-          ),
-        }));
-      }
+      newCrop = {
+        ...crop,
+        x: dragStart.cropStart.x + deltaX,
+        y: dragStart.cropStart.y + deltaY,
+      };
+    } else if (dragType === "nw") {
+      const newWidth = dragStart.cropStart.width - deltaX;
+      const newHeight = ratio
+        ? newWidth / ratio
+        : dragStart.cropStart.height - deltaY;
+      newCrop = {
+        x: dragStart.cropStart.x + dragStart.cropStart.width - newWidth,
+        y: dragStart.cropStart.y + dragStart.cropStart.height - newHeight,
+        width: newWidth,
+        height: newHeight,
+      };
+    } else if (dragType === "ne") {
+      const newWidth = dragStart.cropStart.width + deltaX;
+      const newHeight = ratio
+        ? newWidth / ratio
+        : dragStart.cropStart.height - deltaY;
+      newCrop = {
+        x: dragStart.cropStart.x,
+        y: dragStart.cropStart.y + dragStart.cropStart.height - newHeight,
+        width: newWidth,
+        height: newHeight,
+      };
+    } else if (dragType === "sw") {
+      const newWidth = dragStart.cropStart.width - deltaX;
+      const newHeight = ratio
+        ? newWidth / ratio
+        : dragStart.cropStart.height + deltaY;
+      newCrop = {
+        x: dragStart.cropStart.x + dragStart.cropStart.width - newWidth,
+        y: dragStart.cropStart.y,
+        width: newWidth,
+        height: newHeight,
+      };
+    } else if (dragType === "se") {
+      const newWidth = dragStart.cropStart.width + deltaX;
+      const newHeight = ratio
+        ? newWidth / ratio
+        : dragStart.cropStart.height + deltaY;
+      newCrop = {
+        x: dragStart.cropStart.x,
+        y: dragStart.cropStart.y,
+        width: newWidth,
+        height: newHeight,
+      };
+    } else if (dragType === "n") {
+      const newHeight = dragStart.cropStart.height - deltaY;
+      const newWidth = ratio ? newHeight * ratio : dragStart.cropStart.width;
+      newCrop = {
+        x: ratio
+          ? dragStart.cropStart.x + (dragStart.cropStart.width - newWidth) / 2
+          : dragStart.cropStart.x,
+        y: dragStart.cropStart.y + dragStart.cropStart.height - newHeight,
+        width: newWidth,
+        height: newHeight,
+      };
+    } else if (dragType === "s") {
+      const newHeight = dragStart.cropStart.height + deltaY;
+      const newWidth = ratio ? newHeight * ratio : dragStart.cropStart.width;
+      newCrop = {
+        x: ratio
+          ? dragStart.cropStart.x + (dragStart.cropStart.width - newWidth) / 2
+          : dragStart.cropStart.x,
+        y: dragStart.cropStart.y,
+        width: newWidth,
+        height: newHeight,
+      };
+    } else if (dragType === "w") {
+      const newWidth = dragStart.cropStart.width - deltaX;
+      const newHeight = ratio ? newWidth / ratio : dragStart.cropStart.height;
+      newCrop = {
+        x: dragStart.cropStart.x + dragStart.cropStart.width - newWidth,
+        y: ratio
+          ? dragStart.cropStart.y + (dragStart.cropStart.height - newHeight) / 2
+          : dragStart.cropStart.y,
+        width: newWidth,
+        height: newHeight,
+      };
+    } else if (dragType === "e") {
+      const newWidth = dragStart.cropStart.width + deltaX;
+      const newHeight = ratio ? newWidth / ratio : dragStart.cropStart.height;
+      newCrop = {
+        x: dragStart.cropStart.x,
+        y: ratio
+          ? dragStart.cropStart.y + (dragStart.cropStart.height - newHeight) / 2
+          : dragStart.cropStart.y,
+        width: newWidth,
+        height: newHeight,
+      };
     }
 
-    setDragStart({ x: e.clientX, y: e.clientY });
+    setCrop(constrainCrop(newCrop));
   };
 
   const handleMouseUp = () => {
@@ -136,15 +215,18 @@ export default function AdvancedImageEditor() {
         window.removeEventListener("mouseup", handleMouseUp);
       };
     }
-  }, [isDragging, dragStart]);
+  }, [isDragging, dragStart, crop]);
 
   useEffect(() => {
     const ratio = aspectRatios[aspectRatio].ratio;
     if (ratio && imageRef.current) {
-      setCrop((prev) => ({
-        ...prev,
-        height: prev.width / ratio,
-      }));
+      setCrop((prev) => {
+        const newCrop = {
+          ...prev,
+          height: prev.width / ratio,
+        };
+        return constrainCrop(newCrop);
+      });
     }
   }, [aspectRatio]);
 
@@ -168,7 +250,7 @@ export default function AdvancedImageEditor() {
 
     for (let i = 0; i < 10; i++) {
       blob = await new Promise((resolve) =>
-        canvas.toBlob(resolve, `image/${format}`, currentQuality)
+        canvas.toBlob(resolve, `image/${format}`, currentQuality),
       );
 
       const sizeKB = blob.size / 1024;
@@ -199,7 +281,7 @@ export default function AdvancedImageEditor() {
       0,
       0,
       crop.width,
-      crop.height
+      crop.height,
     );
 
     const results = [];
@@ -210,20 +292,20 @@ export default function AdvancedImageEditor() {
       mainBlob = await compressToTargetSize(
         canvas,
         outputFormat,
-        targetFileSize
+        targetFileSize,
       );
     } else {
       mainBlob = await new Promise((resolve) =>
-        canvas.toBlob(resolve, `image/${outputFormat}`, quality)
+        canvas.toBlob(resolve, `image/${outputFormat}`, quality),
       );
     }
 
     const mainUrl = URL.createObjectURL(mainBlob);
     results.push({
-      name: `cropped.${outputFormat}`,
+      name: `cropped-${Math.round(crop.width)}x${Math.round(crop.height)}.${outputFormat}`,
       url: mainUrl,
       size: (mainBlob.size / 1024).toFixed(2),
-      dimensions: `${crop.width}x${crop.height}`,
+      dimensions: `${Math.round(crop.width)}x${Math.round(crop.height)}`,
     });
 
     // Multiple sized outputs
@@ -242,17 +324,17 @@ export default function AdvancedImageEditor() {
           resizeBlob = await compressToTargetSize(
             resizeCanvas,
             outputFormat,
-            targetFileSize
+            targetFileSize,
           );
         } else {
           resizeBlob = await new Promise((resolve) =>
-            resizeCanvas.toBlob(resolve, `image/${outputFormat}`, quality)
+            resizeCanvas.toBlob(resolve, `image/${outputFormat}`, quality),
           );
         }
 
         const resizeUrl = URL.createObjectURL(resizeBlob);
         results.push({
-          name: `${output.width}x${output.height}.${outputFormat}`,
+          name: `resized-${output.width}x${output.height}.${outputFormat}`,
           url: resizeUrl,
           size: (resizeBlob.size / 1024).toFixed(2),
           dimensions: `${output.width}x${output.height}`,
@@ -284,22 +366,39 @@ export default function AdvancedImageEditor() {
     });
   };
 
+  const addNewSize = () => {
+    setMultipleOutputs((prev) => [
+      ...prev,
+      { width: 800, height: 600, enabled: true },
+    ]);
+  };
+
+  const removeSize = (index) => {
+    setMultipleOutputs((prev) => prev.filter((_, i) => i !== index));
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-br from-purple-50 to-blue-100 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <h1 className="text-3xl font-bold text-gray-800 mb-6 flex items-center gap-3">
-            <Image className="text-purple-600" size={32} />
-            Advanced Image Cropper & Compressor
-          </h1>
+        <div className="bg-white rounded-3xl shadow-2xl p-6 md:p-8">
+          <div className="mb-8">
+            <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-2 flex items-center gap-3">
+              <Image className="text-indigo-600" size={40} />
+              Professional Image Cropper
+            </h1>
+            <p className="text-gray-600">
+              Crop with precision, resize to perfection
+            </p>
+          </div>
 
           {!image ? (
-            <div className="border-4 border-dashed border-purple-300 rounded-xl p-12 text-center hover:border-purple-500 transition-colors">
-              <Upload className="mx-auto text-purple-400 mb-4" size={64} />
+            <div className="border-4 border-dashed border-indigo-300 rounded-2xl p-16 text-center hover:border-indigo-500 hover:bg-indigo-50 transition-all duration-300">
+              <Upload className="mx-auto text-indigo-400 mb-6" size={80} />
               <label className="cursor-pointer">
-                <span className="text-lg text-gray-700 font-medium">
-                  Click to upload an image
+                <span className="text-xl text-gray-700 font-semibold">
+                  Drop your image here or click to browse
                 </span>
+                <p className="text-gray-500 mt-2">Supports JPG, PNG, WebP</p>
                 <input
                   type="file"
                   accept="image/*"
@@ -311,56 +410,95 @@ export default function AdvancedImageEditor() {
           ) : (
             <div className="grid lg:grid-cols-3 gap-6">
               {/* Left: Preview & Crop */}
-              <div className="lg:col-span-2 space-y-4">
-                <div className="bg-gray-50 rounded-xl p-6">
-                  <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <Crop size={20} className="text-purple-600" />
-                    Crop Area
-                  </h2>
-                  <div className="relative inline-block mb-4">
+              <div className="lg:col-span-2 space-y-6">
+                <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6 shadow-inner">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                      <Crop size={24} className="text-indigo-600" />
+                      Crop Area
+                    </h2>
+                    <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full">
+                      {Math.round(crop.width)} × {Math.round(crop.height)}
+                    </div>
+                  </div>
+
+                  <div
+                    ref={containerRef}
+                    className="relative inline-block mb-6 bg-black bg-opacity-5 rounded-xl p-4"
+                  >
                     <img
                       ref={imageRef}
                       src={image}
                       alt="Preview"
-                      className="max-w-full h-auto rounded-lg"
+                      className="max-w-full h-auto rounded-lg shadow-lg"
                       style={{ maxHeight: "500px" }}
                     />
                     <div
-                      className="absolute border-2 border-purple-500  bg-opacity-20 cursor-move"
+                      className="absolute border-2 border-indigo-500 shadow-2xl cursor-move"
                       style={getCropStyle()}
                       onMouseDown={(e) => handleMouseDown(e, "move")}
                     >
-                      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3">
+                      {/* Grid lines */}
+                      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
                         {[...Array(9)].map((_, i) => (
                           <div
                             key={i}
-                            className="border border-purple-300 border-opacity-50"
+                            className="border border-white border-opacity-30"
                           ></div>
                         ))}
                       </div>
+
+                      {/* Corner handles */}
                       <div
-                        className="absolute bottom-0 right-0 w-5 h-5 bg-purple-600 cursor-nwse-resize rounded-tl"
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          handleMouseDown(e, "resize");
-                        }}
-                      />
+                        onMouseDown={(e) => handleMouseDown(e, "nw")}
+                        className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-full cursor-nw-resize hover:scale-125 transition-transform"
+                      ></div>
+                      <div
+                        onMouseDown={(e) => handleMouseDown(e, "ne")}
+                        className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-full cursor-ne-resize hover:scale-125 transition-transform"
+                      ></div>
+                      <div
+                        onMouseDown={(e) => handleMouseDown(e, "sw")}
+                        className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-full cursor-sw-resize hover:scale-125 transition-transform"
+                      ></div>
+                      <div
+                        onMouseDown={(e) => handleMouseDown(e, "se")}
+                        className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-full cursor-se-resize hover:scale-125 transition-transform"
+                      ></div>
+
+                      {/* Edge handles */}
+                      <div
+                        onMouseDown={(e) => handleMouseDown(e, "n")}
+                        className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-full cursor-n-resize hover:scale-125 transition-transform"
+                      ></div>
+                      <div
+                        onMouseDown={(e) => handleMouseDown(e, "s")}
+                        className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-full cursor-s-resize hover:scale-125 transition-transform"
+                      ></div>
+                      <div
+                        onMouseDown={(e) => handleMouseDown(e, "w")}
+                        className="absolute -left-2 top-1/2 -translate-y-1/2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-full cursor-w-resize hover:scale-125 transition-transform"
+                      ></div>
+                      <div
+                        onMouseDown={(e) => handleMouseDown(e, "e")}
+                        className="absolute -right-2 top-1/2 -translate-y-1/2 w-4 h-4 bg-white border-2 border-indigo-600 rounded-full cursor-e-resize hover:scale-125 transition-transform"
+                      ></div>
                     </div>
                   </div>
 
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-3">
                       Aspect Ratio
                     </label>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-4 md:grid-cols-7 gap-2">
                       {Object.entries(aspectRatios).map(([key, val]) => (
                         <button
                           key={key}
                           onClick={() => setAspectRatio(key)}
-                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 ${
                             aspectRatio === key
-                              ? "bg-purple-600 text-white"
-                              : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                              ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg scale-105"
+                              : "bg-white text-gray-700 hover:bg-gray-100 shadow-sm hover:shadow-md"
                           }`}
                         >
                           {val.label}
@@ -372,39 +510,42 @@ export default function AdvancedImageEditor() {
 
                 {/* Processed Images */}
                 {processedImages.length > 0 && (
-                  <div className="bg-gray-50 rounded-xl p-6">
+                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl p-6 shadow-lg">
                     <div className="flex justify-between items-center mb-4">
-                      <h2 className="text-xl font-semibold text-gray-800">
-                        Processed Images
+                      <h2 className="text-2xl font-bold text-gray-800">
+                        ✨ Processed Images
                       </h2>
                       <button
                         onClick={downloadAll}
-                        className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+                        className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-6 py-2 rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all shadow-lg hover:shadow-xl text-sm font-semibold flex items-center gap-2"
                       >
-                        <Download size={16} />
-                        Download All
+                        <Download size={18} />
+                        Download All ({processedImages.length})
                       </button>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       {processedImages.map((img, i) => (
-                        <div key={i} className="bg-white rounded-lg p-3 shadow">
+                        <div
+                          key={i}
+                          className="bg-white rounded-xl p-3 shadow-md hover:shadow-xl transition-shadow"
+                        >
                           <img
                             src={img.url}
                             alt={img.name}
-                            className="w-full h-32 object-cover rounded mb-2"
+                            className="w-full h-32 object-cover rounded-lg mb-3"
                           />
-                          <p className="text-xs font-medium text-gray-800 truncate">
+                          <p className="text-xs font-bold text-gray-800 truncate mb-1">
                             {img.name}
                           </p>
-                          <p className="text-xs text-gray-500">
-                            {img.dimensions}
-                          </p>
-                          <p className="text-xs text-gray-500 mb-2">
-                            {img.size} KB
-                          </p>
+                          <div className="flex justify-between text-xs text-gray-600 mb-2">
+                            <span>{img.dimensions}</span>
+                            <span className="font-semibold text-indigo-600">
+                              {img.size} KB
+                            </span>
+                          </div>
                           <button
                             onClick={() => downloadImage(img.url, img.name)}
-                            className="w-full bg-purple-600 text-white px-2 py-1 rounded text-xs hover:bg-purple-700"
+                            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all"
                           >
                             Download
                           </button>
@@ -416,30 +557,30 @@ export default function AdvancedImageEditor() {
               </div>
 
               {/* Right: Settings */}
-              <div className="space-y-4">
-                <div className="bg-gray-50 rounded-xl p-6">
-                  <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                    Export Settings
+              <div className="space-y-6">
+                <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl p-6 shadow-lg">
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">
+                    ⚙️ Export Settings
                   </h2>
 
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Output Format
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Format
                       </label>
                       <select
                         value={outputFormat}
                         onChange={(e) => setOutputFormat(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-neutral-950"
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium"
                       >
-                        <option value="png">PNG</option>
                         <option value="jpeg">JPEG</option>
+                        <option value="png">PNG</option>
                         <option value="webp">WebP</option>
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
                         Quality: {Math.round(quality * 100)}%
                       </label>
                       <input
@@ -449,13 +590,13 @@ export default function AdvancedImageEditor() {
                         step="0.01"
                         value={quality}
                         onChange={(e) => setQuality(parseFloat(e.target.value))}
-                        className="w-full text-neutral-950"
+                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Target File Size (KB) - 0 to disable
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Target Size (KB)
                       </label>
                       <input
                         type="number"
@@ -463,36 +604,61 @@ export default function AdvancedImageEditor() {
                         onChange={(e) =>
                           setTargetFileSize(parseInt(e.target.value) || 0)
                         }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-neutral-950"
+                        placeholder="0 = disabled"
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium"
                       />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Set to 0 to disable compression
+                      </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-gray-50 rounded-xl p-6">
-                  <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                    Multiple Sizes
-                  </h2>
-                  <div className="space-y-3">
+                <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-6 shadow-lg">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold text-gray-800">
+                      📐 Multiple Sizes
+                    </h2>
+                    <button
+                      onClick={addNewSize}
+                      className="text-sm bg-purple-600 text-white px-3 py-1 rounded-lg hover:bg-purple-700 font-semibold"
+                    >
+                      + Add
+                    </button>
+                  </div>
+                  <div className="space-y-3 max-h-80 overflow-y-auto">
                     {multipleOutputs.map((output, i) => (
-                      <div key={i} className="bg-white rounded-lg p-3">
-                        <label className="flex items-center gap-2 mb-2">
-                          <input
-                            type="checkbox"
-                            checked={output.enabled}
-                            onChange={(e) =>
-                              updateMultipleOutput(
-                                i,
-                                "enabled",
-                                e.target.checked
-                              )
-                            }
-                            className="w-4 h-4 text-purple-600"
-                          />
-                          <span className="text-sm font-medium text-gray-700">
-                            {output.width}x{output.height}
-                          </span>
-                        </label>
+                      <div
+                        key={i}
+                        className="bg-white rounded-xl p-4 shadow-sm"
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={output.enabled}
+                              onChange={(e) =>
+                                updateMultipleOutput(
+                                  i,
+                                  "enabled",
+                                  e.target.checked,
+                                )
+                              }
+                              className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
+                            />
+                            <span className="text-sm font-bold text-gray-700">
+                              {output.width} × {output.height}
+                            </span>
+                          </label>
+                          {multipleOutputs.length > 1 && (
+                            <button
+                              onClick={() => removeSize(i)}
+                              className="text-red-500 hover:text-red-700 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
                         {output.enabled && (
                           <div className="grid grid-cols-2 gap-2">
                             <input
@@ -502,11 +668,11 @@ export default function AdvancedImageEditor() {
                                 updateMultipleOutput(
                                   i,
                                   "width",
-                                  parseInt(e.target.value) || 0
+                                  parseInt(e.target.value) || 0,
                                 )
                               }
                               placeholder="Width"
-                              className="px-2 py-1 border border-gray-300 rounded text-neutral-950 text-sm"
+                              className="px-3 py-2 border-2 border-gray-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                             />
                             <input
                               type="number"
@@ -515,11 +681,11 @@ export default function AdvancedImageEditor() {
                                 updateMultipleOutput(
                                   i,
                                   "height",
-                                  parseInt(e.target.value) || 0
+                                  parseInt(e.target.value) || 0,
                                 )
                               }
                               placeholder="Height"
-                              className="px-2 py-1 border border-gray-300 text-neutral-950 rounded text-sm"
+                              className="px-3 py-2 border-2 border-gray-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                             />
                           </div>
                         )}
@@ -530,19 +696,19 @@ export default function AdvancedImageEditor() {
 
                 <button
                   onClick={processImage}
-                  className="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 transition-colors font-medium text-lg"
+                  className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white py-4 rounded-2xl hover:shadow-2xl transition-all text-lg font-bold shadow-lg transform hover:scale-105"
                 >
-                  Process Image
+                  🚀 Process Image
                 </button>
 
-                <label className="w-full bg-gray-600 text-white py-3 rounded-lg hover:bg-gray-700 transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer">
-                  <RotateCw size={20} />
+                <label className="w-full bg-gradient-to-r from-gray-700 to-gray-900 text-white py-4 rounded-2xl hover:shadow-xl transition-all font-bold flex items-center justify-center gap-3 cursor-pointer shadow-lg">
+                  <RotateCw size={22} />
                   Upload New Image
                   <input
                     type="file"
                     accept="image/*"
                     onChange={handleImageUpload}
-                    className="hidden "
+                    className="hidden"
                   />
                 </label>
               </div>
