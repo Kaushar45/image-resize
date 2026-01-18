@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Upload, Crop, Download, RotateCw, Image, Trash2 } from "lucide-react";
 
-export default function AdvancedImageCropper() {
+function AdvancedImageCropper() {
   const [image, setImage] = useState(null);
   const [crop, setCrop] = useState({ x: 50, y: 50, width: 300, height: 300 });
   const [isDragging, setIsDragging] = useState(false);
@@ -384,7 +384,7 @@ export default function AdvancedImageCropper() {
           <div className="mb-8">
             <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-2 flex items-center gap-3">
               <Image className="text-indigo-600" size={40} />
-              Professional Image Cropper
+              Image Cropper
             </h1>
             <p className="text-gray-600">
               Crop with precision, resize to perfection
@@ -557,7 +557,7 @@ export default function AdvancedImageCropper() {
               </div>
 
               {/* Right: Settings */}
-              <div className="space-y-6">
+              <div className="space-y-6 text-neutral-900">
                 <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl p-6 shadow-lg">
                   <h2 className="text-xl font-bold text-gray-800 mb-4">
                     ⚙️ Export Settings
@@ -573,8 +573,8 @@ export default function AdvancedImageCropper() {
                         onChange={(e) => setOutputFormat(e.target.value)}
                         className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium"
                       >
-                        <option value="jpeg">JPEG</option>
                         <option value="png">PNG</option>
+                        <option value="jpeg">JPEG</option>
                         <option value="webp">WebP</option>
                       </select>
                     </div>
@@ -614,7 +614,7 @@ export default function AdvancedImageCropper() {
                   </div>
                 </div>
 
-                <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-6 shadow-lg">
+                <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-6 shadow-lg ">
                   <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold text-gray-800">
                       📐 Multiple Sizes
@@ -720,3 +720,5 @@ export default function AdvancedImageCropper() {
     </div>
   );
 }
+
+export default AdvancedImageCropper;
